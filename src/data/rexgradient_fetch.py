@@ -99,10 +99,62 @@ def wanted_from_metadata(meta: dict) -> set[str]:
     return out
 
 
+def first_frontal(paths: list, views: list, frontal_views: set[str]) -> str | None:
+    """The image the Step 0 loader uses as `image_path`: frontal views only, PA before AP, then by path."""
+    from src.data.loaders import _norm_view
+
+    cands = [(0 if _norm_view(v) == "PA" else 1, str(p)) for p, v in zip(paths or [], views or [])
+             if _norm_view(v) in frontal_views]
+    return min(cands)[1] if cands else None
+
+
+def select_subset(meta: dict, n: int | None, seed: int, frontal_views: list[str], min_alpha_chars: int,
+                  require_findings: bool = True) -> dict[str, str]:
+    """Seeded random subset of studies that the Step 0 filters would KEEP (frontal view + informative findings),
+    returned as {study_key: relative path of its first frontal image}. Used for the train split, where fetching
+    every image (~140 GB) does not fit on Kaggle. n=None -> all eligible studies."""
+    import random
+
+    from src.data.text_clean import is_non_informative, normalize
+
+    fv = {v.upper() for v in frontal_views}
+    elig = {}
+    for key, v in meta.items():
+        if require_findings and is_non_informative(normalize(v.get("Findings")), min_alpha_chars):
+            continue
+        f = first_frontal(v.get("ImagePath") or [], v.get("ImageViewPosition") or [], fv)
+        if f is not None:
+            elig[key] = member_rel(f.replace("\\", "/").removeprefix("../"))
+    keys = sorted(elig)
+    if n is not None and n < len(keys):
+        keys = sorted(random.Random(seed).sample(keys, n))
+    return {k: elig[k] for k in keys}
+
+
+def shrink_png(data: bytes, size: int) -> bytes:
+    """Any X-ray PNG -> 8-bit grayscale PNG resized to size x size with bilinear filtering.
+
+    This is what MedGemma's image processor does to every input anyway (Gemma3ImageProcessor: resize to
+    896x896, BILINEAR, no pan-and-scan, transformers 5.23 source), after the same 16-bit -> 8-bit rescale used
+    at inference (to_rgb8). Storing the result cuts a train image from ~1.5 MB to ~0.4 MB."""
+    from PIL import Image
+
+    from src.models.medgemma_zeroshot import to_rgb8
+
+    with Image.open(io.BytesIO(data)) as im:
+        im.load()
+        g = to_rgb8(im).convert("L").resize((size, size), Image.BILINEAR)
+    buf = io.BytesIO()
+    g.save(buf, format="PNG", optimize=False)
+    return buf.getvalue()
+
+
 def extract_wanted(fileobj, wanted: set[str], out_dir: Path, progress_every: int = 20000,
-                   report: Callable[[dict], None] | None = None) -> dict:
+                   report: Callable[[dict], None] | None = None,
+                   transform: Callable[[bytes], bytes] | None = None) -> dict:
     """Stream a tar (already decompressed) and write only wanted members to out_dir/<rel>. Skips files that
-    already exist with the right size (so a re-run after a crash only re-downloads, never re-writes)."""
+    already exist with the right size (so a re-run after a crash only re-downloads, never re-writes).
+    With `transform` (e.g. shrink_png) the stored bytes differ from the archive, so any existing file counts."""
     stats = {"members_seen": 0, "written": 0, "already_present": 0, "bytes_written": 0}
     found: set[str] = set()
     t0 = time.time()
@@ -114,21 +166,25 @@ def extract_wanted(fileobj, wanted: set[str], out_dir: Path, progress_every: int
             if rel in wanted:
                 found.add(rel)
                 dst = out_dir / rel
-                if dst.exists() and dst.stat().st_size == m.size:
+                if dst.exists() and (transform is not None or dst.stat().st_size == m.size):
                     stats["already_present"] += 1
                 else:
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     tmp = dst.with_suffix(dst.suffix + ".part")
                     src = tf.extractfile(m)
+                    n_out = 0
                     with open(tmp, "wb") as f:
-                        while True:
-                            chunk = src.read(4 * 2**20)
-                            if not chunk:
-                                break
-                            f.write(chunk)
+                        if transform is not None:
+                            n_out = f.write(transform(src.read()))
+                        else:
+                            while True:
+                                chunk = src.read(4 * 2**20)
+                                if not chunk:
+                                    break
+                                n_out += f.write(chunk)
                     os.replace(tmp, dst)
                     stats["written"] += 1
-                    stats["bytes_written"] += m.size
+                    stats["bytes_written"] += n_out
         if report and stats["members_seen"] % progress_every == 0:
             report({**stats, "found": len(found), "wanted": len(wanted), "elapsed_s": round(time.time() - t0)})
         if len(found) == len(wanted):

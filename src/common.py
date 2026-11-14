@@ -17,9 +17,24 @@ import yaml
 CODE_ROOT = Path(__file__).resolve().parents[1]  # .../project (where src/, scripts/ live)
 
 
+def _deep_merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
 def load_config(path: str | os.PathLike) -> dict:
+    """YAML config. `inherit: <other.yaml>` (relative to this file) loads that config first and overrides it,
+    so later steps share Step 0's data paths, prompt and generation settings instead of copying them."""
+    path = Path(path)
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f) or {}
+    base = cfg.pop("inherit", None)
+    if base:
+        bp = Path(base) if Path(base).is_absolute() else path.parent / base
+        cfg = _deep_merge(load_config(bp), cfg)
+    return cfg
 
 
 def project_root(cfg: dict) -> Path:
@@ -78,7 +93,7 @@ def git_info() -> dict:
 
 
 _TRACKED_LIBS = [
-    "torch", "transformers", "accelerate", "bitsandbytes", "peft", "trl", "unsloth",
+    "torch", "transformers", "accelerate", "bitsandbytes", "peft", "trl", "unsloth", "unsloth_zoo",
     "radeval", "pandas", "pyarrow", "numpy", "pillow", "faiss-cpu", "faiss-gpu",
 ]
 

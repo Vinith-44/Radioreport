@@ -345,5 +345,5 @@ def test_8bit_image_unchanged(tmp_path):
 
     a = np.arange(256, dtype=np.uint8).reshape(16, 16)
     p = tmp_path / "x8.png"
-    Image.fromarray(a, mode="L").save(p)
+    Image.fromarray(a).save(p)
     assert (np.asarray(load_image(str(p)))[..., 0] == a).all()

@@ -4,6 +4,9 @@ Run ON KAGGLE (needs ~10 GB per split of disk; streams the 155 GB archive once, 
   python scripts/step0_fetch_rexgradient.py --smoke          # first ~300 MB of the archive (pipeline check)
   python scripts/step0_fetch_rexgradient.py                  # test split (default)
   python scripts/step0_fetch_rexgradient.py --splits test val
+  # Step 1 training images: seeded subset of studies the Step 0 filters keep, first frontal image only,
+  # stored as 8-bit 896x896 PNGs (what MedGemma's processor produces anyway); ~0.4 MB per image.
+  python scripts/step0_fetch_rexgradient.py --splits train val --train-studies 22000 --val-studies 1000       --resize 896 --out-dir /kaggle/working/rexgradient-160k-train-subset
 
 Needs HF_TOKEN (Kaggle Secret) with access to the gated repo. Output (fetch.out_dir in the config):
   <out_dir>/metadata/{train,valid,test}_metadata_view_position.json
@@ -26,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.common import load_config, write_run_info  # noqa: E402
 from src.data.rexgradient_fetch import (PARTS, ConcatParts, download_metadata, extract_wanted,  # noqa: E402
-                                        hf_open_part_factory, load_meta, wanted_from_metadata, zstd_reader)
+                                        hf_open_part_factory, load_meta, select_subset, shrink_png,
+                                        wanted_from_metadata, zstd_reader)
 from src.models.medgemma_zeroshot import hf_token  # noqa: E402
 
 META_FILES = {"train": "train_metadata_view_position.json", "val": "valid_metadata_view_position.json",
@@ -39,6 +43,9 @@ def main() -> None:
     ap.add_argument("--splits", nargs="+", default=["test"], choices=["train", "val", "test"])
     ap.add_argument("--out-dir", help="override fetch.out_dir")
     ap.add_argument("--smoke", action="store_true", help="stream only the first ~300 MB")
+    ap.add_argument("--train-studies", type=int, help="train: seeded subset of N eligible studies (first frontal only)")
+    ap.add_argument("--val-studies", type=int, help="val: seeded subset of N eligible studies (first frontal only)")
+    ap.add_argument("--resize", type=int, help="store 8-bit grayscale PNGs of this square size (e.g. 896)")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -54,10 +61,24 @@ def main() -> None:
     meta_dir = paths[0].parent
     wanted: set[str] = set()
     per_split = {}
+    flt = cfg["filters"]
+    subsets = {}
     for s in args.splits:
-        w = wanted_from_metadata(load_meta(meta_dir / META_FILES[s]))
+        meta = load_meta(meta_dir / META_FILES[s])
+        n_sub = {"train": args.train_studies, "val": args.val_studies}.get(s)
+        if n_sub:
+            sub = select_subset(meta, n_sub, int(cfg["seed"]), flt["frontal_views"], int(flt["min_alpha_chars"]),
+                                bool(flt.get("require_findings", True)))
+            subsets[s] = sorted(sub)
+            w = set(sub.values())
+            print(f"[{s}] subset: {len(sub)} of {len(meta)} studies (seed {cfg['seed']}), first frontal image only",
+                  flush=True)
+        else:
+            w = wanted_from_metadata(meta)
         per_split[s] = len(w)
         wanted |= w
+    if subsets:
+        (out / "subset_studies.json").write_text(json.dumps(subsets), encoding="utf-8")
     img_dir = out / "deid_png"
     if args.smoke:
         # Test studies are spread over the whole archive; add train so the smoke run proves files get written.
@@ -65,7 +86,8 @@ def main() -> None:
         img_dir = out / "smoke_deid_png"
     print(f"wanted images: {per_split} (total {len(wanted)}){' + train (smoke only)' if args.smoke else ''}",
           flush=True)
-    write_run_info(out, cfg, args, {"step": "step0_fetch_rexgradient", "wanted": per_split})
+    write_run_info(out, cfg, args, {"step": "step0_fetch_rexgradient", "wanted": per_split, "resize": args.resize})
+    transform = (lambda b: shrink_png(b, args.resize)) if args.resize else None
 
     limit = 300 * 2**20 if args.smoke else None
     raw = ConcatParts(hf_open_part_factory(fcfg["repo"], tok), PARTS, byte_limit=limit)
@@ -80,13 +102,13 @@ def main() -> None:
 
     try:
         stats = extract_wanted(zstd_reader(raw), wanted, img_dir, report=report,
-                               progress_every=2000 if args.smoke else 20000)
+                               progress_every=2000 if args.smoke else 20000, transform=transform)
     except (EOFError, tarfile.ReadError) as e:
         if not args.smoke:
             raise
         n = sum(1 for _ in img_dir.rglob("*.png")) if img_dir.exists() else 0
         stats = {"note": f"smoke byte limit reached ({type(e).__name__})", "smoke_pngs_written": n}
-    stats.update({"splits": args.splits, "wanted_per_split": per_split, "streamed_gb": round(raw.total / 1e9, 2),
+    stats.update({"splits": args.splits, "wanted_per_split": per_split, "resize": args.resize, "streamed_gb": round(raw.total / 1e9, 2),
                   "minutes": round((time.time() - t0) / 60, 1), "smoke": args.smoke})
     missing = stats.get("missing", [])
     stats["missing_count"] = len(missing)

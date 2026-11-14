@@ -28,7 +28,24 @@ def hf_token() -> str | None:
         return None
 
 
-def load_model(model_id: str, dtype: str):
+def adapter_digest(adapter: str | None) -> str | None:
+    """sha256 of the adapter weights, so one predictions file can never mix two checkpoints."""
+    if not adapter:
+        return None
+    import hashlib
+    from pathlib import Path
+
+    files = sorted(Path(adapter).glob("adapter_model.*"))
+    if not files:
+        raise FileNotFoundError(f"no adapter_model.* in {adapter}")
+    h = hashlib.sha256()
+    with open(files[0], "rb") as f:
+        for chunk in iter(lambda: f.read(8 * 2**20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def load_model(model_id: str, dtype: str, adapter: str | None = None):
     import torch
     import transformers
     from transformers import AutoModelForImageTextToText, AutoProcessor
@@ -52,13 +69,26 @@ def load_model(model_id: str, dtype: str):
             load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.float32)
         kwargs[dkey] = torch.float32
     model = AutoModelForImageTextToText.from_pretrained(model_id, **kwargs).eval()
+    if adapter:
+        # Step 1+: a LoRA adapter on top of the same base (the processor is the base model's, unchanged).
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(model, adapter).eval()
     processor = AutoProcessor.from_pretrained(model_id, token=kwargs["token"])
     processor.tokenizer.padding_side = "left"
     return model, processor
 
 
-def build_prompt(template: str, indication: str, empty_indication: str) -> str:
-    return template.format(indication=(indication or "").strip() or empty_indication)
+def build_prompt(template: str, indication: str, empty_indication: str, references: str | None = None) -> str:
+    """references: the Step 2 retrieval block; required iff the template has a {references} slot."""
+    ind = (indication or "").strip() or empty_indication
+    if "{references}" in template:
+        if not references:
+            raise ValueError("this prompt template needs retrieved references")
+        return template.format(indication=ind, references=references)
+    if references:
+        raise ValueError("references given but the template has no {references} slot")
+    return template.format(indication=ind)
 
 
 def to_rgb8(im: Image.Image) -> Image.Image:
@@ -73,7 +103,7 @@ def to_rgb8(im: Image.Image) -> Image.Image:
         a = np.asarray(im, dtype=np.float32)
         lo, hi = float(a.min()), float(a.max())
         a = (a - lo) / (hi - lo) * 255.0 if hi > lo else np.zeros_like(a)
-        im = Image.fromarray(a.round().astype(np.uint8), mode="L")
+        im = Image.fromarray(a.round().astype(np.uint8))  # 2-D uint8 -> mode "L" (no mode=: removed in Pillow 13)
     return im.convert("RGB")
 
 

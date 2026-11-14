@@ -1,0 +1,41 @@
+# Step 2 - fact-aware case retrieval (CLAUDE.md §6 Step 2), evaluated as an ablation on Model A.
+# Inherits Step 1 (-> Step 0): same data, test subset, Model A adapter, decoding settings and scoring.
+inherit: step1.yaml
+
+retrieval:
+  step1_run: a1                  # Step 1 run whose adapter + predictions form the "without retrieval" arm
+  encoder: google/medsiglip-448
+  dtype: fp16                    # CLAUDE.md: fp16; non-finite embeddings abort (rerun with --dtype fp32)
+  batch_size: 32
+  num_workers: 4
+  report_text: findings+impression   # what is labelled with CheXbert and shown as a reference
+  top_k: 20                      # image-similarity candidates from the TRAIN index
+  n_refs: 3                      # reports inserted into the prompt after re-ranking
+  dedupe: true                   # never show two identical reference texts
+  max_ref_chars: 500             # per reference, to bound the prompt length
+
+probe:                           # 14 CheXbert labels from frozen MedSigLIP embeddings (reused in Step 3)
+  hidden: 512                    # 0 = linear probe
+  dropout: 0.1
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  batch_size: 256
+
+ablation:
+  system: model-a+retrieval
+  # Pre-registered keep rule ("keep retrieval only if it does not hurt clinical metrics"), per dataset:
+  #  - no significant drop (paired test, alpha = scoring.significance_level) in RadGraph F1, RaTEScore or GREEN;
+  #  - corpus-level CheXbert micro-F1 (5 and 14 labels) not lower by more than this (no paired test exists):
+  max_chexbert_drop: 0.01
+
+generation:
+  # Identical to the Step 0/1 prompt plus one block. Model A was trained WITHOUT this block (inference-time only).
+  prompt_template_retrieval: |-
+    You are an expert radiologist. Write the radiology report for this frontal chest X-ray.
+    Indication: {indication}
+    Reports from OTHER patients (style reference only; they do not describe this image):
+    {references}
+    Reply in exactly this format and nothing else:
+    FINDINGS: <findings>
+    IMPRESSION: <impression>

@@ -1,0 +1,6 @@
+# Step 1+ training (Unsloth QLoRA). APIs verified against the source of exactly these versions.
+-r requirements.txt
+unsloth==2026.11.4
+unsloth_zoo==2026.11.4
+trl==1.15.0                # unsloth 2026.11.4 requires trl<=1.15.0
+datasets>=3.4.1,<5.0       # unsloth requirement

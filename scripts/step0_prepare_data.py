@@ -26,15 +26,25 @@ from src.data.splits import assert_no_leakage, save_json, select_eval_ids, write
 def locate_rexgradient(dcfg: dict) -> dict:
     """If the configured ReXGradient paths are missing, look for the fetched folder under /kaggle/input
     (a notebook's output is mounted at a path that depends on Kaggle's layout)."""
-    if Path(dcfg["root"]).exists():
-        return dcfg
     base = Path("/kaggle/input")
-    for depth in range(0, 5):
-        for hit in base.glob("*/" * depth + "rexgradient-160k-test-images"):
-            if (hit / "metadata").exists() and (hit / "deid_png").exists():
-                print(f"[rexgradient] configured root missing; using {hit}", flush=True)
-                return {**dcfg, "root": str(hit / "metadata"), "images_root": str(hit / "deid_png")}
-    return dcfg
+
+    def find(name: str, need_meta: bool):
+        for depth in range(0, 5):
+            for hit in base.glob("*/" * depth + name):
+                if (hit / "deid_png").exists() and (not need_meta or (hit / "metadata").exists()):
+                    return hit
+        return None
+
+    out = dict(dcfg)
+    if not Path(dcfg["root"]).exists() and (hit := find("rexgradient-160k-test-images", True)):
+        print(f"[rexgradient] configured root missing; using {hit}", flush=True)
+        out.update(root=str(hit / "metadata"), images_root=str(hit / "deid_png"))
+    extra = [x for x in (dcfg.get("extra_images_roots") or []) if Path(x).exists()]
+    if not extra and (hit := find("rexgradient-160k-train-subset", False)):
+        print(f"[rexgradient] train-subset images found at {hit}", flush=True)
+        extra = [str(hit / "deid_png")]
+    out["extra_images_roots"] = extra
+    return out
 
 
 def inspect(cfg: dict) -> None:

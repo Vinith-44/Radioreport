@@ -1,5 +1,8 @@
 # Step 0. Python >= 3.11 (RadEval requirement). Kaggle images already ship torch/pandas/pyarrow/pillow.
-transformers>=5.0          # RadEval requires >=5.0; batched MedGemma path verified on 5.3
+# transformers pinned for ALL steps: Unsloth 2026.11.4 (Step 1) allows <=5.17.0, and the zero-shot baseline
+# must run on the same version as the fine-tuned model. RadEval requires >=5.0.
+transformers==5.17.0
+peft==0.21.3               # loads the Step 1 LoRA adapter for evaluation
 accelerate>=1.1
 bitsandbytes>=0.45         # only for --dtype nf4
 pyyaml
@@ -11,3 +14,4 @@ huggingface_hub>=0.30      # HfFileSystem streaming of the ReXGradient archive
 zstandard                  # the ReXGradient "tar" is zstd-compressed (stdlib compression.zstd only on py>=3.14)
 # RadEval pinned to the commit whose API was verified (2.2.2-dev; PyPI has 2.2.1):
 radeval @ git+https://github.com/jbdel/RadEval@d412dc2da7df92f72d0b7128aee57b0237ec1b9a
+faiss-cpu==1.16.0          # Step 2 retrieval index (exact inner product)

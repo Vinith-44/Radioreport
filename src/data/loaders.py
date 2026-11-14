@@ -274,11 +274,13 @@ def _load_rex_json(path: Path) -> dict:
 
 def inspect_rexgradient(cfg: dict) -> str:
     """Print-friendly summary of the real files/fields and image-name matching."""
-    root, img_root = Path(cfg["root"]), Path(cfg["images_root"])
-    lines = [f"ReXGradient metadata root: {root} (exists={root.exists()})",
-             f"ReXGradient images root:   {img_root} (exists={img_root.exists()})"]
-    available = _index_images(img_root) if img_root.exists() else set()
-    lines.append(f"  image files found: {len(available)}; e.g. {sorted(available)[:2]}")
+    root = Path(cfg["root"])
+    lines = [f"ReXGradient metadata root: {root} (exists={root.exists()})"]
+    available: set[str] = set()
+    for r in [Path(cfg["images_root"])] + [Path(x) for x in (cfg.get("extra_images_roots") or [])]:
+        av = _index_images(r) if r.exists() else set()
+        lines.append(f"ReXGradient images root:   {r} (exists={r.exists()}): {len(av)} files; e.g. {sorted(av)[:1]}")
+        available |= av
     for split, rel in cfg["metadata_files"].items():
         p = root / rel
         if not p.exists():
@@ -288,17 +290,21 @@ def inspect_rexgradient(cfg: dict) -> str:
         k0 = next(iter(d))
         lines.append(f"  [{split}] {rel}: {len(d)} studies; fields={list(d[k0])}")
         hit = sum(any(_resolve_image(k, ip, available) for ip in v.get("ImagePath") or []) for k, v in d.items())
-        lines.append(f"      studies with >=1 image present in images_root: {hit}/{len(d)}")
+        lines.append(f"      studies with >=1 image present in the image roots: {hit}/{len(d)}")
     return "\n".join(lines)
 
 
 def load_rexgradient(cfg: dict, seed: int, stats: Counter, smoke_n: int | None = None,
                      frontal_views: list[str] | None = None) -> pd.DataFrame:
     frontal_views = {v.upper() for v in (frontal_views or ["PA", "AP"])}
-    root, img_root = Path(cfg["root"]), Path(cfg["images_root"])
-    available = _index_images(img_root)
+    root = Path(cfg["root"])
+    # images_root = the fetched test images; extra_images_roots = e.g. the Step 1 train subset. Missing extra
+    # roots are skipped (Step 0 runs before the train subset exists).
+    roots = [Path(cfg["images_root"])] + [Path(x) for x in (cfg.get("extra_images_roots") or []) if Path(x).exists()]
+    available = [(r, _index_images(r)) for r in roots]
     stats["split_method"] = "official ReXGradient split files"
-    stats["rexgradient_image_files_indexed"] = len(available)
+    stats["rexgradient_image_roots"] = [str(r) for r in roots]
+    stats["rexgradient_image_files_indexed"] = sum(len(a) for _, a in available)
 
     recs = []
     for split, rel in cfg["metadata_files"].items():
@@ -337,11 +343,11 @@ def load_rexgradient(cfg: dict, seed: int, stats: Counter, smoke_n: int | None =
         for p, vw in sorted(zip(paths, views), key=lambda t: (0 if t[1] == "PA" else 1, t[0])):
             if vw not in frontal_views and vw not in LATERAL_VIEWS:
                 continue
-            f = _resolve_image(key, p, available)
+            f = next((r / hit for r, av in available if (hit := _resolve_image(key, p, av)) is not None), None)
             if f is None:
                 n_unresolved += 1
                 continue
-            (fr if vw in frontal_views else lat).append(str(img_root / f))
+            (fr if vw in frontal_views else lat).append(str(f))
             if vw in frontal_views:
                 fr_view.append(vw)
         if not fr and n_unresolved and any(vw in frontal_views for vw in views):

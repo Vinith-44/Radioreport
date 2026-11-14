@@ -1,0 +1,43 @@
+# Step 1 - Model A: QLoRA fine-tune of MedGemma 1.5 4B-it (CLAUDE.md §6 Step 1).
+# Inherits Step 0 (data paths, filters, prompt, generation, scoring) so train and eval use the same prompt
+# and the same fixed test subset (step0_eval_ids.json) -> paired comparison with zero-shot MedGemma 1.5.
+inherit: step0.yaml
+
+model_a:
+  base: medgemma-1.5            # key under models: (google/medgemma-1.5-4b-it)
+  system: model-a               # name of the prediction folder / results-table row
+
+train:
+  # Studies per dataset from the TRAIN split only (seeded). CLAUDE.md: "Start with 20-30k studies".
+  # ReXGradient train images come from the train-subset fetch (22k pre-filtered studies; 20k are used here).
+  datasets: {rexgradient: 20000, iu_xray: all}
+  val_studies: 300              # eval-loss subset of the VAL split (never test)
+  max_seq_length: 1024          # 256 image tokens + ~90 prompt tokens + report; longer examples are dropped, not cut
+  lora: {r: 16, alpha: 16, dropout: 0.05}   # CLAUDE.md: r=16 (try 32), alpha 16, dropout 0.05
+  finetune_vision_layers: false # vision encoder frozen
+  finetune_language_layers: true
+  finetune_attention_modules: true   # + mlp = all linear layers of the language model
+  finetune_mlp_modules: true
+  lr: 2.0e-4
+  per_device_batch: 2
+  grad_accum: 8                 # effective batch 16 (single T4: Unsloth's open-source trainer is single-GPU)
+  epochs: 1
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  lr_scheduler: cosine
+  optim: adamw_8bit
+  max_grad_norm: 1.0
+  logging_steps: 10
+  eval_steps: 200
+  save_steps: 100               # checkpoints for resuming across 12 h Kaggle sessions
+  save_total_limit: 2
+  max_hours: 11.0               # stop + checkpoint before Kaggle's 12 h limit; rerun with the same --run-name
+  num_workers: 2
+  smoke: {datasets: {rexgradient: 40, iu_xray: 10}, val_studies: 8, max_steps: 6}
+
+# Generation for the fine-tuned model: same prompt / greedy decoding / max_new_tokens as Step 0 (inherited).
+# The adapter was trained on the 4-bit (nf4) base, so it is evaluated on that same base (fp32 compute: fp16 would
+# overflow). Note: the zero-shot baseline ran on fp32 weights; 4-bit can only cost Model A accuracy, so a
+# significant win is a conservative result.
+generation:
+  dtype: nf4
