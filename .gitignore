@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+# Generated data and runs (patient data must never be committed)
+data/*.parquet
+data/*.json
+outputs/runs/
+*.png
+*.jpg

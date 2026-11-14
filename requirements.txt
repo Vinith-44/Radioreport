@@ -1,0 +1,13 @@
+# Step 0. Python >= 3.11 (RadEval requirement). Kaggle images already ship torch/pandas/pyarrow/pillow.
+transformers>=5.0          # RadEval requires >=5.0; batched MedGemma path verified on 5.3
+accelerate>=1.1
+bitsandbytes>=0.45         # only for --dtype nf4
+pyyaml
+pandas
+pyarrow
+pillow
+pytest
+huggingface_hub>=0.30      # HfFileSystem streaming of the ReXGradient archive
+zstandard                  # the ReXGradient "tar" is zstd-compressed (stdlib compression.zstd only on py>=3.14)
+# RadEval pinned to the commit whose API was verified (2.2.2-dev; PyPI has 2.2.1):
+radeval @ git+https://github.com/jbdel/RadEval@d412dc2da7df92f72d0b7128aee57b0237ec1b9a

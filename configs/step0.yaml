@@ -1,0 +1,97 @@
+# Step 0 — data cleaning + zero-shot baseline.
+# Every path below is a Kaggle default. Check them against your attached datasets
+# (`python scripts/step0_prepare_data.py --config configs/step0.yaml --inspect`) before the full run.
+
+seed: 42
+
+paths:
+  # All outputs go here (CLAUDE.md §2). Override with env PROJECT_ROOT for local tests.
+  project_root: /kaggle/working/project
+
+datasets:
+  iu_xray:
+    enabled: true
+    # Kaggle dataset: raddar/chest-xrays-indiana-university (layout verified via Kaggle API)
+    root: /kaggle/input/datasets/raddar/chest-xrays-indiana-university
+    reports_csv: indiana_reports.csv          # uid, MeSH, Problems, image, indication, comparison, findings, impression
+    projections_csv: indiana_projections.csv  # uid, filename, projection (Frontal/Lateral)
+    images_dir: images/images_normalized
+    # R2Gen split file (iu_xray/annotation.json from the R2Gen release). Attach it as a Kaggle dataset.
+    # If null, a seeded 70/10/20 patient split is used and the manifest records split_method=seeded_patient
+    # (NOT the R2Gen split - do not compare those numbers with papers).
+    r2gen_annotation: null
+    fallback_split: {train: 0.7, val: 0.1, test: 0.2}
+
+  mimic_cxr:
+    # DISABLED: the only Kaggle copy (simhadrisadaram/mimic-cxr-dataset) is an unofficial re-upload with no
+    # test split or split file. Enable once an official MIMIC-CXR-JPG copy (PhysioNet access) is attached.
+    enabled: false
+    # Requires PhysioNet credentialed access (MIMIC-CXR + MIMIC-CXR-JPG). Point these at your private Kaggle dataset.
+    split_csv: /kaggle/input/mimic-cxr-jpg/mimic-cxr-2.0.0-split.csv.gz       # dicom_id, study_id, subject_id, split
+    metadata_csv: /kaggle/input/mimic-cxr-jpg/mimic-cxr-2.0.0-metadata.csv.gz # dicom_id, ..., ViewPosition, StudyDate, StudyTime
+    reports_root: /kaggle/input/mimic-cxr-reports/files   # files/pXX/pSUBJECT/sSTUDY.txt
+    images_root: /kaggle/input/mimic-cxr-jpg/files        # files/pXX/pSUBJECT/sSTUDY/DICOM_ID.jpg
+    image_ext: .jpg
+
+  rexgradient:
+    enabled: true
+    # Official data from HF rajpurkarlab/ReXGradient-160K, fetched once with scripts/step0_fetch_rexgradient.py
+    # and saved as a PRIVATE Kaggle dataset (license: non-commercial, no redistribution).
+    # Metadata schema (verified): dict keyed by study id "p<PatientID>_a<Accession>_s<StudyUID>" -> PatientID,
+    # StudyDate, Indication, Comparison, Findings, Impression, ImagePath[list], ImageViewPosition[list].
+    # Set <your-dataset> to the name you give the private dataset.
+    root: /kaggle/input/datasets/vinithvanjangi/rexgradient-160k-test-images/metadata
+    metadata_files:
+      train: train_metadata_view_position.json
+      val: valid_metadata_view_position.json
+      test: test_metadata_view_position.json
+    images_root: /kaggle/input/datasets/vinithvanjangi/rexgradient-160k-test-images/deid_png
+    # (Old option, no longer needed for Step 0: vinithvanjangi/rexgradient-medgemma-json has images for only
+    #  1,172 of the 10,000 test studies; the loader also accepts its flattened <study id>_<UID>.png names.)
+    fetch:
+      repo: rajpurkarlab/ReXGradient-160K
+      out_dir: /kaggle/working/rexgradient-160k-test-images   # ~10 GB for the test split
+
+filters:
+  require_findings: true      # Step 0 evaluates FINDINGS generation; studies without a FINDINGS section are dropped
+  frontal_views: [PA, AP]
+  min_alpha_chars: 10         # a cleaned FINDINGS text with fewer letters than this counts as non-informative
+
+eval:
+  max_test_studies: 2000      # per dataset; a seeded random subset of the cleaned test split (null = all)
+  min_test_studies: 1000      # acceptance criterion (CLAUDE.md Step 0)
+  smoke_n: 50
+
+models:
+  medgemma-1: google/medgemma-4b-it
+  medgemma-1.5: google/medgemma-1.5-4b-it
+
+generation:
+  # T4 has no bf16, and Gemma 3 overflows to inf/NaN in fp16 (HF transformers PR #36832).
+  # fp32 is the faithful zero-shot baseline: ~17 GB of weights, sharded over both T4s via device_map=auto.
+  # Options: fp32 | fp16 | nf4. Any non-fp32 choice is recorded in run_info.json and in the results table.
+  dtype: fp32
+  batch_size: 8
+  max_new_tokens: 300
+  do_sample: false
+  num_workers: 2
+  # Abort if more than this fraction of the first `empty_check_n` outputs is empty (fp16 overflow symptom).
+  empty_abort_frac: 0.5
+  empty_check_n: 16
+  prompt_template: |-
+    You are an expert radiologist. Write the radiology report for this frontal chest X-ray.
+    Indication: {indication}
+    Reply in exactly this format and nothing else:
+    FINDINGS: <findings>
+    IMPRESSION: <impression>
+  empty_indication: Not provided.
+
+scoring:
+  # RadEval metric names (verified against RadEval source, commit d412dc2).
+  default_metrics: [radgraph, f1chexbert, ratescore, radcliq, bleu, rouge]
+  per_sample_metrics: [radgraph, ratescore]   # cached for the paired test (mean of per-sample == corpus score)
+  green: true                                 # GREEN-radllama2-7b; ~2.2 s/sample on GPU
+  smoke_metrics: [radgraph, f1chexbert, bleu, rouge]
+  targets: [findings, report]                 # findings-only (primary) and findings+impression
+  significance_n_samples: 10000
+  significance_level: 0.05
