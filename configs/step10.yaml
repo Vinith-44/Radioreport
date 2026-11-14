@@ -1,0 +1,23 @@
+# Step 10 - app + deployment (CLAUDE.md §6 Step 10). Inherits Step 9 -> 8 -> 3 -> 2 -> 1 -> 0.
+inherit: step9.yaml
+
+app:
+  # Final system. null -> the Step 5 winner. If Step 9 PASSED, use the GRPO model, e.g.
+  # {type: a, step: step9, run: g1, system: model-a-grpo}
+  system: null
+  winner_run: b2
+  step2_run: r1                 # probe, MedSigLIP train embeddings + index, CheXbert train labels (supporting cases)
+  step8_run: s1                 # VAL-calibrated second-reader thresholds
+  boxes: {enabled: true, dtype: nf4}   # MedGemma localisation; nf4 keeps memory low (only used for Model B finals)
+  extra_languages: [bengali, marathi, kannada, malayalam, gujarati]
+  asr:
+    english: google/medasr      # gated; English only (model card); 16 kHz CTC
+    indic: openai/whisper-small # pluggable: any HF ASR model id (e.g. an AI4Bharat IndicConformer checkpoint)
+  pdf:
+    title: "Radioreport: AI-assisted chest X-ray report"
+    subtitle: "Research / radiologist-assist tool - not a diagnosis"
+    indic_font_ttf: null        # e.g. /kaggle/input/noto-fonts/NotoSansDevanagari-Regular.ttf (+ pip install uharfbuzz)
+
+offline:
+  n_reports: 20                 # timed reports (after 2 warm-up runs) from the fixed test subset
+  with_verification: true       # also time the probe + CheXbert verification (boxes off: see app.boxes)

@@ -29,7 +29,7 @@ from src.models.medgemma_zeroshot import (adapter_digest, build_prompt, generate
 
 # Settings that must not change within a run (otherwise one predictions file would mix two systems).
 LOCKED = ("model_id", "dtype", "prompt_template", "empty_indication", "max_new_tokens", "do_sample",
-          "adapter_sha256", "retrieval_sha256")
+          "adapter_sha256", "retrieval_sha256", "test_file")
 
 
 def _collate(batch):
@@ -58,6 +58,7 @@ def main(defaults: dict | None = None) -> None:
     ap.add_argument("--dtype", choices=["fp32", "fp16", "nf4"])
     ap.add_argument("--batch-size", type=int)
     ap.add_argument("--step", default="step0", help="outputs/runs/<step>/...")
+    ap.add_argument("--test-file", default="test", help="test parquet stem (Step 6: test_photo)")
     ap.add_argument("--adapter", help="LoRA adapter directory (Step 1+)")
     ap.add_argument("--system", help="output folder / system name (default: --model)")
     ap.add_argument("--retrieval", help="Step 2: retrieval.jsonl (study_id -> references block); switches to "
@@ -79,7 +80,7 @@ def main(defaults: dict | None = None) -> None:
     suffix = "_smoke" if args.smoke else ""
 
     ddir = data_dir(cfg)
-    test = pd.read_parquet(ddir / f"test{suffix}.parquet")
+    test = pd.read_parquet(ddir / f"{args.test_file}{suffix}.parquet")
     eval_ids = json.loads((ddir / f"step0_eval_ids{suffix}.json").read_text(encoding="utf-8"))
     datasets = args.datasets or list(eval_ids)
 
@@ -98,7 +99,7 @@ def main(defaults: dict | None = None) -> None:
         refs = {r["study_id"]: r["references"] for r in read_jsonl(Path(args.retrieval))}
         template = g["prompt_template_retrieval"]
     settings = {"model_id": model_id, "dtype": g["dtype"], "prompt_template": template,
-                "retrieval_sha256": r_sha,
+                "retrieval_sha256": r_sha, "test_file": args.test_file,
                 "empty_indication": g["empty_indication"], "max_new_tokens": g["max_new_tokens"],
                 "do_sample": g["do_sample"], "adapter": args.adapter, "adapter_sha256": a_sha}
 

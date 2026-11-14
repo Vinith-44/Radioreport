@@ -30,11 +30,12 @@ def main() -> None:
     ap.add_argument("--adapter")
     known, _ = ap.parse_known_args()
     cfg = load_config(known.config)
-    adapter = known.adapter or str(run_dir(cfg, "step1", known.run_name + ("_smoke" if known.smoke else "")) / "adapter")
+    step = cfg.get("run_step", "step1")
+    adapter = known.adapter or str(run_dir(cfg, step, known.run_name + ("_smoke" if known.smoke else "")) / "adapter")
     if not (Path(adapter) / "adapter_config.json").exists():
         raise SystemExit(f"No trained adapter at {adapter} (run scripts/step1_train_qlora.py to completion first).")
     generate({"config": known.config, "run_name": known.run_name, "model": cfg["model_a"]["base"],
-              "step": "step1", "system": cfg["model_a"]["system"], "adapter": adapter})
+              "step": step, "system": cfg["model_a"]["system"], "adapter": adapter})
 
 
 if __name__ == "__main__":

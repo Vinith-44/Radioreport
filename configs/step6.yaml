@@ -1,0 +1,16 @@
+# Step 6 - robustness to phone photos / WhatsApp (CLAUDE.md §6 Step 6). Inherits Step 5 (-> 4 -> 0).
+inherit: step5.yaml
+
+robust:
+  winner_run: b2                # Step 5 run whose winner.json names the final system
+  # the robustly trained twin of the winner (same recipe + train.augment_p 0.4), trained with
+  # configs/step6_model_a.yaml or configs/step6_model_b.yaml; run name under runs/step6
+  robust_run: r1
+  photo_seed: 2026              # the photo-style test set: one fixed corruption per study (never used in training)
+  chexphoto:
+    # UNOFFICIAL Kaggle re-upload of Stanford's CheXphoto (photos of CheXpert-TRAIN images); licence: Stanford
+    # research use agreement - check it before use. Labels only -> label agreement, never report metrics.
+    root: /kaggle/input/datasets/gajahterbang111/chexphoto-split
+    clean_root: /kaggle/input/datasets/ashery/chexpert      # the same studies' clean originals
+    n: 500                      # seeded sample of frontal photos whose patient was in NO training set
+    kinds: [natural]            # CheXphoto subsets to use (natural = real phone photos)

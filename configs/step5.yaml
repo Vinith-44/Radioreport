@@ -1,0 +1,30 @@
+# Step 5 - Model B phase 2: joint tuning (CLAUDE.md §6 Step 5). Same trainer as Step 4 (run_step: step5).
+inherit: step4.yaml
+run_step: step5
+
+align_data:
+  real: {rexgradient: 20000, iu_xray: all}   # real reports only (MIMIC is not available)
+  chexpert: {n: 0}                           # no template reports in phase 2
+  nih: {n: 0}
+  val: {rexgradient: 150, iu_xray: 50, chexpert_valid: 0}
+
+train:
+  init_projector: b1            # Step 4 run name whose projector.pt starts phase 2
+  lr: 1.5e-4                    # projector (CLAUDE.md: 1e-4 to 2e-4)
+  lr_llm: 3.0e-5                # LoRA on the LLM (CLAUDE.md: 2e-5 to 5e-5)
+  lora: {r: 16, alpha: 16, dropout: 0.05,
+         target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]}
+  use_prior: true               # "Prior report: ..." in the prompt when the patient's prior study is in the same split
+  epochs: 1
+  eval_every: 300
+
+model_b_eval:
+  system: model-b
+  batch_size: 8
+  max_new_tokens: 300           # = Step 0 generation.max_new_tokens (same decoding budget as Model A)
+
+compare:
+  model_a: {step: step1, run: a1, system: model-a}
+  # Pre-registered winner rule: higher RadGraph F1 (findings) averaged over datasets; tie (< 0.5 points) ->
+  # higher CheXbert-14 micro F1. The winner carries Steps 6-10, the other is reported as an ablation.
+  tie_points: 0.005

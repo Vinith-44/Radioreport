@@ -1,0 +1,5 @@
+# Step 6 robust twin of Model A: exactly the Step 1 recipe + 40% photo-augmented training images.
+inherit: step1.yaml
+run_step: step6
+model_a: {system: model-a-robust}
+train: {augment_p: 0.4}

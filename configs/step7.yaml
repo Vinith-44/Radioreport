@@ -1,0 +1,18 @@
+# Step 7 - Indian-language patient summary + back-translation faithfulness check (CLAUDE.md §6 Step 7).
+inherit: step6.yaml
+
+multilingual:
+  # English reports to summarise: the final system's test predictions. null -> the Step 5 winner
+  # (robust.winner_run winner.json). Or e.g. {step: step3, run: v1, system: model-a+verified-drop}.
+  source: null
+  n_reports: 300                 # seeded sample of test reports (each is summarised once, then translated)
+  languages: [hindi, tamil, telugu]   # then: bengali, marathi, kannada, malayalam, gujarati
+  summarizer: medgemma-1.5       # key under models: (text-only use)
+  summarizer_dtype: fp32
+  backend: indictrans2           # indictrans2 | llm   (llm = the summariser model translates)
+  indictrans2:
+    en_indic: ai4bharat/indictrans2-en-indic-1B
+    indic_en: ai4bharat/indictrans2-indic-en-1B
+    dtype: fp16
+  max_new_tokens: 300
+  batch_size: 8

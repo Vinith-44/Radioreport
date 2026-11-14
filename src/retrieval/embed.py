@@ -34,17 +34,27 @@ def canonical_image(path: str) -> Image.Image:
 
 
 def resize_448(g: Image.Image) -> Image.Image:
+    """Grayscale (L) or RGB -> 448x448 RGB, bilinear without antialiasing (per channel)."""
     import torch
     import torch.nn.functional as F
 
-    t = torch.from_numpy(np.asarray(g, dtype=np.float32))[None, None]
+    arr = np.asarray(g, dtype=np.float32)
+    if arr.ndim == 3:   # RGB (e.g. a Step 6 photo-augmented image)
+        t = torch.from_numpy(arr).permute(2, 0, 1)[None]
+        r = F.interpolate(t, size=(SIZE, SIZE), mode="bilinear", align_corners=False, antialias=False)
+        return Image.fromarray(r[0].permute(1, 2, 0).clamp(0, 255).round().to(torch.uint8).numpy())
+    t = torch.from_numpy(arr)[None, None]
     r = F.interpolate(t, size=(SIZE, SIZE), mode="bilinear", align_corners=False, antialias=False)
     a = r[0, 0].clamp(0, 255).round().to(torch.uint8).numpy()
     return Image.fromarray(a).convert("RGB")
 
 
-def load_for_siglip(path: str) -> Image.Image:
-    return resize_448(canonical_image(path))
+def load_for_siglip(path: str, transform=None) -> Image.Image:
+    """transform (Step 6 augmentation) acts on the canonical 896x896 image, before the 448 resize."""
+    g = canonical_image(path)
+    # back to grayscale after augmentation: a photo-test image saved as RGB also becomes "L" in canonical_image,
+    # so augmented training images and photo test images reach the encoder the same way
+    return resize_448(transform(g).convert("L") if transform is not None else g)
 
 
 class SigLIPEmbedder:

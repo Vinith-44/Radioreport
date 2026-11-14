@@ -1,0 +1,7 @@
+# Step 10 app (versions whose APIs were checked against their source / model cards)
+-r requirements.txt
+gradio==6.32.0
+reportlab==5.1.0
+psutil
+# optional: Indian scripts in the PDF need a Noto TTF font + text shaping
+# uharfbuzz

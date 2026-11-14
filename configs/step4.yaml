@@ -1,0 +1,47 @@
+# Step 4 - Model B phase 1: projector alignment (CLAUDE.md §6 Step 4). Inherits Step 0 data paths / prompt.
+inherit: step0.yaml
+
+model_b:
+  encoder: google/medsiglip-448     # frozen; patch tokens 32x32 -> 16x16 = 256 image tokens after the 2x2 merge
+  encoder_dtype: fp16               # frozen + no_grad; non-finite features abort (use fp32 then)
+  llm: google/gemma-3-1b-it         # frozen in phase 1 (CLAUDE.md: start with 1B, try 4B)
+  llm_dtype: fp32                   # Gemma 3 overflows in fp16 and the T4 has no bf16 -> fp32 (1B = ~4 GB)
+  merge: 2
+  projector_hidden: null            # null = LLM hidden size
+
+align_data:
+  # real reports (TRAIN split of the Step 0 parquet; MIMIC is not available, see configs/step0.yaml)
+  real: {rexgradient: 12000, iu_xray: all}
+  # synthetic template reports from image labels (src/data/synthetic.py); train splits only
+  chexpert: {root: /kaggle/input/datasets/ashery/chexpert, n: 12000}
+  nih: {root: /kaggle/input/datasets/organizations/nih-chest-xrays/data, n: 8000}
+  # validation (loss + coherence samples): real VAL reports + CheXpert's official valid split
+  val: {rexgradient: 150, iu_xray: 50, chexpert_valid: 234}
+
+train:
+  lr: 1.0e-3                        # projector only
+  weight_decay: 0.0
+  warmup_frac: 0.03
+  batch_size: 8                     # per GPU
+  grad_accum: 4                     # effective 32 per GPU
+  epochs: 1
+  max_target_tokens: 256            # longer reports are dropped from training (never cut)
+  gradient_checkpointing: true      # through the frozen LLM (activations still need grads for the projector)
+  log_every: 10
+  eval_every: 300
+  save_every: 200
+  max_hours: 11.0
+  num_workers: 4
+  smoke: {n_train: 48, n_val: 8, max_steps: 6}
+
+acceptance:                         # fixed before training
+  # converged: mean loss of the last 10% of steps <= first_5pct_ratio x mean of the first 5%, and changed by less
+  # than plateau_rel vs the preceding 10% (no longer falling fast)
+  first_5pct_ratio: 0.8
+  plateau_rel: 0.05
+  # coherent: on n_samples val images, >= format_ok of outputs have FINDINGS + IMPRESSION and <= max_repeat
+  # contain a repeated sentence; the samples are printed and saved for reading
+  n_samples: 64
+  format_ok: 0.9
+  max_repeat: 0.1
+  max_new_tokens: 200

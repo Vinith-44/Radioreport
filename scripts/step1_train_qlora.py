@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 INSTRUCTION_PART = "<start_of_turn>user\n"   # Gemma 3 chat template turn markers
 RESPONSE_PART = "<start_of_turn>model\n"
 LOCKED = ("base_model_id", "lora", "finetune", "lr", "effective_batch", "epochs", "max_seq_length", "seed",
-          "train_ids_sha256", "prompt_template")
+          "train_ids_sha256", "prompt_template", "augment_p")
 
 
 def _ids_sha(ids) -> str:
@@ -97,7 +97,7 @@ def main() -> None:
           flush=True)
 
     # ---------------- run dir + locked settings (resume safety) ----------------
-    rdir = run_dir(cfg, "step1", args.run_name + suffix)
+    rdir = run_dir(cfg, cfg.get("run_step", "step1"), args.run_name + suffix)   # Step 6 reuses this trainer
     ckdir = rdir / "checkpoints"
     eff_batch = int(t["per_device_batch"]) * int(t["grad_accum"])
     fin = {k: bool(t[k]) for k in ("finetune_vision_layers", "finetune_language_layers",
@@ -136,7 +136,7 @@ def main() -> None:
     settings = {"base_model_id": model_id, "lora": t["lora"], "finetune": fin, "lr": float(t["lr"]),
                 "effective_batch": eff_batch, "epochs": float(t["epochs"]), "max_seq_length": int(t["max_seq_length"]),
                 "seed": seed, "train_ids_sha256": _ids_sha([r["study_id"] for r in tr_rows]),
-                "prompt_template": g["prompt_template"]}
+                "prompt_template": g["prompt_template"], "augment_p": float(t.get("augment_p", 0.0))}
     meta_p = rdir / "train_meta.json"
     if meta_p.exists():
         old = json.loads(meta_p.read_text(encoding="utf-8"))
@@ -151,7 +151,8 @@ def main() -> None:
     write_run_info(rdir, cfg, args, {"step": "step1_train", "settings": settings, "n_train": len(tr_rows),
                                      "n_val": len(va_rows), "max_hours": max_hours})
 
-    train_ds = SFTImageDataset(tr_rows, g["prompt_template"], g["empty_indication"])
+    train_ds = SFTImageDataset(tr_rows, g["prompt_template"], g["empty_indication"],
+                               augment_p=float(t.get("augment_p", 0.0)), seed=seed)
     val_ds = SFTImageDataset(va_rows, g["prompt_template"], g["empty_indication"])
     collator = UnslothVisionDataCollator(model, processor, max_seq_length=int(t["max_seq_length"]),
                                          train_on_responses_only=True, instruction_part=INSTRUCTION_PART,

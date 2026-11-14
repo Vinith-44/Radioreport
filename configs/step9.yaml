@@ -1,0 +1,27 @@
+# Step 9 - GRPO with multiple rewards (CLAUDE.md §6 Step 9, stretch). Inherits Step 8 -> 3 -> 2 -> 1 -> 0.
+inherit: step8.yaml
+
+grpo:
+  winner_run: b2               # Step 5 run whose winner.json names the SFT model to improve (its LoRA trains)
+  source: null                 # or an explicit spec, e.g. {type: a, step: step1, run: a1, system: model-a}
+  step2_run: r1                # probe + TRAIN image embeddings (probe probabilities for the verify reward)
+  n_prompts: 2000              # "a few thousand prompts" - TRAIN split only, seeded
+  prompts_per_step: 2          # x num_generations completions per optimizer step
+  num_generations: 4           # CLAUDE.md T4 setting
+  max_completion_length: 256   # CLAUDE.md T4 setting
+  temperature: 1.0
+  beta: 0.04                   # KL to the SFT model (adapter disabled)
+  lr: 5.0e-6                   # LoRA only
+  max_grad_norm: 1.0
+  save_every: 50
+  max_hours: 11.0
+  rewards:
+    weights: {clinical: 1.0, verify: 0.5, format: 0.5, length: 0.1}
+    strong_margin: 0.5         # same "strong" probe definition as Step 3
+    target_words: 120          # length penalty only beyond this
+  smoke: {n_prompts: 4, steps: 2}
+
+grpo_eval:
+  system_suffix: -grpo
+  # Pre-registered acceptance: a significant paired gain (alpha = scoring.significance_level) on CheXbert micro-F1
+  # (14 labels) or GREEN vs the SFT model, AND a RadGraph F1 point estimate that is not lower, on every dataset.

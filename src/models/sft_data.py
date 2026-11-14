@@ -44,8 +44,9 @@ class SFTImageDataset:
 
     column_names = None
 
-    def __init__(self, rows: list[dict], template: str, empty_indication: str):
+    def __init__(self, rows: list[dict], template: str, empty_indication: str, augment_p: float = 0.0, seed: int = 0):
         self.rows, self.template, self.empty = rows, template, empty_indication
+        self.augment_p, self.seed, self.calls = augment_p, seed, 0
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -54,7 +55,17 @@ class SFTImageDataset:
         if i >= len(self.rows) or i < -len(self.rows):
             raise IndexError(i)
         r = self.rows[i]
-        return {"messages": build_messages(r, self.template, self.empty, image=load_image(r["image_path"]))}
+        im = load_image(r["image_path"])
+        if self.augment_p > 0:   # Step 6: phone-photo / WhatsApp corruptions on augment_p of the examples
+            import random
+
+            from src.data.augment import photo_augment
+
+            self.calls += 1
+            rng = random.Random(hash((self.seed, i, self.calls)))
+            if rng.random() < self.augment_p:
+                im = photo_augment(im, rng)
+        return {"messages": build_messages(r, self.template, self.empty, image=im)}
 
     def __iter__(self):
         for i in range(len(self)):

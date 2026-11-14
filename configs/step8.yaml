@@ -1,0 +1,12 @@
+# Step 8 - second-reader mode (CLAUDE.md §6 Step 8). Inherits Step 3 (probe, boxes) -> 2 -> 1 -> 0.
+inherit: step3.yaml
+
+second_reader:
+  step2_run: r1                 # probe + val/test image embeddings
+  # per condition, at most this share of VAL studies without it get flagged (tau calibration). It adds up over
+  # the 13 conditions: 0.02 would flag ~23% of normal reports at least once; 0.005 -> ~6%.
+  target_far: 0.005
+  min_absent: 20
+  key_findings: [Lung Lesion, Pneumothorax, Consolidation]   # nodule, pneumothorax, consolidation
+  use_boxes: false              # true: a flag also needs a MedGemma box (step3 localisation; slower, fewer alarms)
+  max_studies: null             # null = the whole fixed test subset

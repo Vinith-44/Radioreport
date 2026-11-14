@@ -1,0 +1,44 @@
+# Step 3 - verify-then-report (CLAUDE.md §6 Step 3). Inherits Step 2 (-> 1 -> 0): data, probe, scoring.
+inherit: step2.yaml
+
+verify:
+  # Reports to verify = the best system so far. If Step 2 KEPT retrieval, switch to
+  # {step: step2, run: r1, system: model-a+retrieval}.
+  source: {step: step1, run: a1, system: model-a}
+  step2_run: r1                  # probe, test-image embeddings, retrieval.jsonl (supporting cases)
+  max_studies_per_dataset: null  # null = the whole fixed test subset; set e.g. 1000 to bound the box queries
+  strong_margin: 0.5             # "strong" probe evidence: p >= t + m(1-t) or p <= t(1-m)
+  side_center_band: 0.05         # |box centre - 0.5| <= band -> "center" (no side)
+  sections: [findings, impression]
+  drop_system: verified-drop     # name suffix of the "FLAGGED sentences removed" system
+
+box:                             # MedGemma 1.5 localisation (official prompt, see src/verify/boxes.py)
+  model: medgemma-1.5            # BASE model (not the Step 1 adapter, which was trained only to write reports)
+  dtype: fp32                    # as the Step 0 baseline (fp16 overflows on T4); nf4 is faster, less exact
+  batch_size: 8
+  max_new_tokens: 1000           # official notebook value (the prompt asks for reasoning before the answer)
+  # Query phrase per CheXbert finding ("Where is the <phrase>?"). No Finding is never localised.
+  phrases:
+    Enlarged Cardiomediastinum: enlarged cardiomediastinum
+    Cardiomegaly: enlarged heart
+    Lung Opacity: lung opacity
+    Lung Lesion: lung nodule or mass
+    Edema: pulmonary edema
+    Consolidation: consolidation
+    Pneumonia: pneumonia
+    Atelectasis: atelectasis
+    Pneumothorax: pneumothorax
+    Pleural Effusion: pleural effusion
+    Pleural Other: pleural thickening
+    Fracture: fracture
+    Support Devices: support device (tube, line, catheter or pacemaker)
+
+nih_boxes:                       # box-quality check on NIH ChestX-ray14 expert boxes (labels-only dataset:
+  # used ONLY to evaluate localisation, never as report ground truth)
+  root: /kaggle/input/datasets/organizations/nih-chest-xrays/data
+  csv: BBox_List_2017.csv        # columns: Image Index, Finding Label, Bbox [x, y, w, h] (pixels, 1024x1024)
+  per_label: 40                  # seeded sample per NIH label (8 labels; 984 boxes / 880 images in total)
+  # NIH label -> CheXbert finding whose query phrase (box.phrases) is used, i.e. the same query as in verify
+  label_map: {Atelectasis: Atelectasis, Cardiomegaly: Cardiomegaly, Effusion: Pleural Effusion,
+              Infiltrate: Lung Opacity, Mass: Lung Lesion, Nodule: Lung Lesion, Pneumonia: Pneumonia,
+              Pneumothorax: Pneumothorax}
